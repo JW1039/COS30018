@@ -128,7 +128,7 @@ def load_and_clean_data(start_date, end_date, ticker='CBA.AX', handle_nan='drop'
     return {
         'train_data': train_data, 
         'test_data': test_data, 
-        'scalers': scalers if scalers else None
+        'scalers': scalers
     }
 
 
