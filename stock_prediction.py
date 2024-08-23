@@ -22,8 +22,12 @@ import pandas as pd
 import pandas_datareader as web
 import datetime as dt
 import tensorflow as tf
+import os
+from random import seed
 
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
@@ -45,8 +49,103 @@ TRAIN_END = '2023-08-01'       # End date to read
 
 import yfinance as yf
 
-# Get the data for the stock AAPL
-data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
+
+def load_and_clean_data(start_date, end_date, ticker='CBA.AX', handle_nan='drop', 
+                        scale=False, feature_columns=None, save_local=True, 
+                        load_local=True, local_dir='data', test_size=0.2, 
+                        split_by='date', split_date=None):
+    
+    # Local file path for saving data
+    local_file = os.path.join(local_dir, f"{ticker}_{start_date}_{end_date}.csv")
+    # Create local "data" (or parameter otherwise) directory if it doesn't exist
+    os.makedirs(local_dir, exist_ok=True)
+    
+    # Load data from local storage if it exists and the parmaeter is set to true
+    # otherwise download the data, and if the "save_local" parameter is set, save it to the "data" folder
+    if load_local and os.path.exists(local_file):
+        df = pd.read_csv(local_file, index_col='Date', parse_dates=True)
+        print(f"Loaded data from {local_file}.")
+    else:
+        # Download data using the yfinance library
+        df = yf.download(ticker, start=start_date, end=end_date)
+        if df.empty:
+            raise ValueError(f"No data was downloaded for {ticker}. Please check the ticker symbol and date range.")
+
+    
+    # Calculate the mid-point (average) of Open & Close prices
+    df['Mid_Price'] = (df['Open'] + df['Close']) / 2
+
+    # Handle NaN values depending on method
+    # if method is drop, use DataFrame.dropna to remove rows with NaN issues
+    # otherwise use forward filling with DataFrame.fillna, filling NaN rows with the most recent valid numerical values
+    if handle_nan == 'drop':
+        df.dropna(inplace=True)
+    elif handle_nan == 'fill':
+        df.fillna(method='ffill', inplace=True)
+    
+    # Scaling features
+    # if the scale parameter is set to true:
+    # if feature columns is not passed, set them to all columns
+    # then iterate through all 'feature' columns and add them to a list of MinMaxScaler's
+    # for normalization of data, as well as run the scaler on the dataset to minimize outliers
+    scalers = {}
+    if scale:
+        if feature_columns is None:
+            feature_columns = df.columns.tolist()
+        for column in feature_columns:
+            if column in df.columns:
+                scaler = MinMaxScaler()
+                df[column] = scaler.fit_transform(df[[column]])
+                scalers[column] = scaler
+            else:
+                raise KeyError(f"Column '{column}' not found in data.")
+    
+
+    # Save data locally if required and data not previously saved
+    if save_local and not os.path.exists(local_file):
+        df.to_csv(local_file)
+        print(f"Data saved to {local_file}.")
+
+    # Splitting the data into train and test sets
+    # given the passed split_date, split the data using the index (which is Date)
+    if split_by == 'date':
+        # Set the split_date to the midpoint (median) date if it is not provided
+        if split_date is None:
+            split_date = df.index[int(len(df) / 2)]
+        
+        train_data = df[df.index <= split_date]
+        test_data = df[df.index > split_date]
+
+    # randomely split the test data using sklearn.model_selection.train_test_split
+    # this is achieved through the random_state parameter, set my student ID for reproducible results
+    # the ratio of test data is also set by the test_size parameter (default 0.2 - 20%)
+    elif split_by == 'random':
+        train_data, test_data = train_test_split(df, test_size=test_size, random_state=103984916, shuffle=True)
+    else:
+        raise ValueError("split_by must be either 'date' or 'random'")
+    
+    # Return the cleaned DataFrame, scalers, and the train/test split
+    return {
+        'train_data': train_data, 
+        'test_data': test_data, 
+        'scalers': scalers if scalers else None
+    }
+
+
+fetched_data = load_and_clean_data(
+    ticker=COMPANY,
+    start_date=TRAIN_START,
+    end_date=TRAIN_END,
+    handle_nan='fill',
+    scale=True,
+    feature_columns=['Mid_Price', 'Volume'],
+    split_by="date",
+    split_date="2021-08-01"
+)
+
+data = fetched_data['train_data']
+test_data = fetched_data['test_data']
+scalers = fetched_data['scalers']
 
 #------------------------------------------------------------------------------
 # Prepare Data
@@ -189,8 +288,7 @@ TEST_END = '2024-07-02'
 
 # test_data = web.DataReader(COMPANY, DATA_SOURCE, TEST_START, TEST_END)
 
-test_data = yf.download(COMPANY,TEST_START,TEST_END)
-
+# test_data = yf.download(COMPANY,TEST_START,TEST_END)
 
 # The above bug is the reason for the following line of code
 # test_data = test_data[1:]
