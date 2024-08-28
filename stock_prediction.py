@@ -20,8 +20,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import pandas_datareader as web
+import os
 import datetime as dt
 import tensorflow as tf
+import mplfinance as mpf
 
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
@@ -47,7 +49,6 @@ import yfinance as yf
 
 # Get the data for the stock AAPL
 data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
-
 #------------------------------------------------------------------------------
 # Prepare Data
 ## To do:
@@ -57,6 +58,112 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 # 2) Use a different price value eg. mid-point of Open & Close
 # 3) Change the Prediction days
 #------------------------------------------------------------------------------
+
+
+def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
+                     scale=False, feature_columns=None, save_local=True, 
+                     load_local=True, local_dir='data'):
+    """
+    Load, clean, and optionally scale stock data from Yahoo Finance.
+    
+    Parameters:
+    - ticker (str): Stock ticker (e.g., 'AAPL').
+    - start_date (str): Start date for data.
+    - end_date (str): End date for data.
+    - handle_nan (str): How to handle NaN values ('drop' or 'fill').
+    - scale (bool): Whether to scale the feature columns.
+    - feature_columns (list): Columns to include and optionally scale.
+    - save_local (bool): Whether to save cleaned data locally.
+    - load_local (bool): Whether to load data from local storage.
+    - local_dir (str): Directory for saving/loading data.
+    
+    Returns:
+    - pd.DataFrame: Cleaned DataFrame with added features.
+    """
+    
+    # Local file path
+    local_file = os.path.join(local_dir, f"{ticker}_{start_date}_{end_date}.csv")
+    
+    # Create local directory if it doesn't exist
+    os.makedirs(local_dir, exist_ok=True)
+    
+    # Load data from local storage if available
+    if load_local and os.path.exists(local_file):
+        df = pd.read_csv(local_file, index_col='Date', parse_dates=True)
+        print(f"Loaded data from {local_file}.")
+    else:
+        # Download data using yfinance
+        df = yf.download(ticker, start=start_date, end=end_date)
+        if df.empty:
+            raise ValueError(f"No data was downloaded for {ticker}. Please check the ticker symbol and date range.")
+        
+        # Save data locally if required
+        if save_local:
+            df.to_csv(local_file)
+            print(f"Data saved to {local_file}.")
+    
+    # Calculate the mid-point of Open & Close prices
+    df['Mid_Price'] = (df['Open'] + df['Close']) / 2
+    
+    # Handle NaN values
+    if handle_nan == 'drop':
+        df.dropna(inplace=True)
+    elif handle_nan == 'fill':
+        df.fillna(method='ffill', inplace=True)
+    
+    # Scaling features
+    if scale:
+        if feature_columns is None:
+            feature_columns = df.columns.tolist()
+        scalers = {}
+        for column in feature_columns:
+            if column in df.columns:
+                scaler = MinMaxScaler()
+                df[column] = scaler.fit_transform(df[[column]])
+                scalers[column] = scaler
+            else:
+                raise KeyError(f"Column '{column}' not found in data.")
+    
+    # Return the cleaned DataFrame
+    return df
+
+
+def clean_data(data, start_date=None, end_date=None):
+    data
+
+data = clean_stock_data(
+    ticker='AAPL',
+    start_date='2020-01-01',
+    end_date='2023-07-31',
+    handle_nan='fill',
+    scale=True,
+    feature_columns=['Mid_Price', 'Volume']
+)
+
+
+
+def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
+
+    if n_days > 1:
+        # Resample data to aggregate over n_days
+        data_resampled = data.resample(f'{n_days}D').agg({
+            'Open': 'first', 
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        })
+    else:
+        data_resampled = data
+    
+    mpf.plot(data_resampled, type='candle', volume=True, title=title, style='charles')
+
+# plot_candlestick_chart(data,n_days=365)
+
+
+
+
+
 PRICE_VALUE = "Close"
 
 scaler = MinMaxScaler(feature_range=(0, 1)) 
