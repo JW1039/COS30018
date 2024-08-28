@@ -161,10 +161,35 @@ def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
     
     mpf.plot(data_resampled, type='candle', volume=True, title=title, style='charles')
 
-# plot_candlestick_chart(data,n_days=365)
+plot_candlestick_chart(data,n_days=365)
 
+def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1):
 
+    # Resample the data over the specified number of days if n_days > 1 (for error handling)
+    if n_days > 1:
+        data_resampled = data.resample(f'{n_days}D').agg({
+            'Open': 'first', 
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last'
+        })
+    else:
+        data_resampled = data
 
+    # Create a DataFrame for plotting, containing only the defined columns
+    prices = data_resampled[['Open', 'High', 'Low', 'Close']]
+
+    # Plot the boxplot using plt
+    plt.figure(figsize=(10, 6))
+    prices.boxplot(column=['Open', 'High', 'Low', 'Close'])
+    plt.title(title)
+    plt.ylabel("Price")
+    plt.xlabel("Price Categories")
+    plt.show()
+
+plot_boxplot_chart(data, n_days=30*6)
+
+exit()
 
 
 PRICE_VALUE = "Close"
