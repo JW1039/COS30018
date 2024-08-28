@@ -26,6 +26,8 @@ import tensorflow as tf
 import mplfinance as mpf
 
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
@@ -49,6 +51,7 @@ import yfinance as yf
 
 # Get the data for the stock AAPL
 data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
+
 #------------------------------------------------------------------------------
 # Prepare Data
 ## To do:
@@ -296,8 +299,7 @@ TEST_END = '2024-07-02'
 
 # test_data = web.DataReader(COMPANY, DATA_SOURCE, TEST_START, TEST_END)
 
-test_data = yf.download(COMPANY,TEST_START,TEST_END)
-
+# test_data = yf.download(COMPANY,TEST_START,TEST_END)
 
 # The above bug is the reason for the following line of code
 # test_data = test_data[1:]
