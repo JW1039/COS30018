@@ -66,23 +66,6 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
                      scale=False, feature_columns=None, save_local=True, 
                      load_local=True, local_dir='data'):
-    """
-    Load, clean, and optionally scale stock data from Yahoo Finance.
-    
-    Parameters:
-    - ticker (str): Stock ticker (e.g., 'AAPL').
-    - start_date (str): Start date for data.
-    - end_date (str): End date for data.
-    - handle_nan (str): How to handle NaN values ('drop' or 'fill').
-    - scale (bool): Whether to scale the feature columns.
-    - feature_columns (list): Columns to include and optionally scale.
-    - save_local (bool): Whether to save cleaned data locally.
-    - load_local (bool): Whether to load data from local storage.
-    - local_dir (str): Directory for saving/loading data.
-    
-    Returns:
-    - pd.DataFrame: Cleaned DataFrame with added features.
-    """
     
     # Local file path
     local_file = os.path.join(local_dir, f"{ticker}_{start_date}_{end_date}.csv")
@@ -135,7 +118,7 @@ def clean_data(data, start_date=None, end_date=None):
     data
 
 data = clean_stock_data(
-    ticker='AAPL',
+    ticker=COMPANY,
     start_date='2020-01-01',
     end_date='2023-07-31',
     handle_nan='fill',
@@ -144,11 +127,14 @@ data = clean_stock_data(
 )
 
 
-
+# plot a candlestick chart given a DataFrame
 def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
 
+    # Resample the data over the specified number of days if n_days > 1        
+    # # as there is no need to resample data to a 1 day timeframe
+    # data displayed in each candlestick according to high, low, open and close categories
+    # with width of each candle
     if n_days > 1:
-        # Resample data to aggregate over n_days
         data_resampled = data.resample(f'{n_days}D').agg({
             'Open': 'first', 
             'High': 'max',
@@ -159,13 +145,18 @@ def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
     else:
         data_resampled = data
     
+    # plot the chart using mplfinance
     mpf.plot(data_resampled, type='candle', volume=True, title=title, style='charles')
 
-plot_candlestick_chart(data,n_days=365)
 
-def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1):
+plot_candlestick_chart(data,n_days=30)
 
-    # Resample the data over the specified number of days if n_days > 1 (for error handling)
+# plot a boxplot chart given a DataFrame
+def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['Open', 'High', 'Low', 'Close']):
+
+    # Resample the data over the specified number of days if n_days > 1
+    # as there is no need to resample data to a 1 day timeframe
+    # data categorized based on open, high, low and close categories
     if n_days > 1:
         data_resampled = data.resample(f'{n_days}D').agg({
             'Open': 'first', 
@@ -177,17 +168,23 @@ def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1):
         data_resampled = data
 
     # Create a DataFrame for plotting, containing only the defined columns
-    prices = data_resampled[['Open', 'High', 'Low', 'Close']]
+    prices = data_resampled[columns]
 
     # Plot the boxplot using plt
     plt.figure(figsize=(10, 6))
-    prices.boxplot(column=['Open', 'High', 'Low', 'Close'])
+
+    # create boxplot from resampled data
+    prices.boxplot(column=columns)
+
+    # define title of chart
     plt.title(title)
+
+    # define labels for x and y axis
     plt.ylabel("Price")
     plt.xlabel("Price Categories")
     plt.show()
 
-plot_boxplot_chart(data, n_days=30*6)
+plot_boxplot_chart(data, n_days=30, columns=["High", "Low", "Open", "Close"])
 
 exit()
 
