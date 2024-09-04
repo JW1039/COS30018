@@ -217,7 +217,9 @@ def create_model(sequence_length, n_features, units=256, cell=LSTM, n_layers=2, 
     model.compile(loss=loss, metrics=["mean_absolute_error"], optimizer=optimizer)
     return model
 
-create_model(sequence_length=N_STEPS, n_features=len(FEATURE_COLUMNS))
+model = create_model(sequence_length=N_STEPS, n_features=len(FEATURE_COLUMNS))
+print(model.evaluate(data["Open"], data.index, verbose=0))
+
 
 exit()
 
