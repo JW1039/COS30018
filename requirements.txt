@@ -1,7 +1,7 @@
 numpy
 matplotlib
 pandas
-tensorflow
+tensorflow==2.15
 scikit-learn
 pandas-datareader
 yfinance

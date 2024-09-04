@@ -29,7 +29,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
+from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, Bidirectional
 
 #------------------------------------------------------------------------------
 # Load Data
@@ -114,8 +114,9 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     return df
 
 
-def clean_data(data, start_date=None, end_date=None):
-    data
+FEATURE_COLUMNS = ['Mid_Price', 'Volume']
+N_STEPS = 25
+
 
 data = clean_stock_data(
     ticker=COMPANY,
@@ -123,7 +124,7 @@ data = clean_stock_data(
     end_date='2023-07-31',
     handle_nan='fill',
     scale=True,
-    feature_columns=['Mid_Price', 'Volume']
+    feature_columns=FEATURE_COLUMNS
 )
 
 
@@ -149,7 +150,7 @@ def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
     mpf.plot(data_resampled, type='candle', volume=True, title=title, style='charles')
 
 
-plot_candlestick_chart(data,n_days=30)
+# plot_candlestick_chart(data,n_days=30)
 
 # plot a boxplot chart given a DataFrame
 def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['Open', 'High', 'Low', 'Close']):
@@ -184,7 +185,39 @@ def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['O
     plt.xlabel("Price Categories")
     plt.show()
 
-plot_boxplot_chart(data, n_days=30, columns=["High", "Low", "Open", "Close"])
+# plot_boxplot_chart(data, n_days=30, columns=["High", "Low", "Open", "Close"])
+
+
+def create_model(sequence_length, n_features, units=256, cell=LSTM, n_layers=2, dropout=0.3,
+                loss="mean_absolute_error", optimizer="rmsprop", bidirectional=False):
+    model = Sequential()
+    for i in range(n_layers):
+        if i == 0:
+            # first layer
+            if bidirectional:
+                model.add(Bidirectional(cell(units, return_sequences=True), batch_input_shape=(None, sequence_length, n_features)))
+            else:
+               model.add(cell(units, return_sequences=True, batch_input_shape=(None, sequence_length, n_features)))
+
+        elif i == n_layers - 1:
+            # last layer
+            if bidirectional:
+                model.add(Bidirectional(cell(units, return_sequences=False)))
+            else:
+                model.add(cell(units, return_sequences=False))
+        else:
+            # hidden layers
+            if bidirectional:
+                model.add(Bidirectional(cell(units, return_sequences=True)))
+            else:
+                model.add(cell(units, return_sequences=True))
+        # add dropout after each layer
+        model.add(Dropout(dropout))
+    model.add(Dense(1, activation="linear"))
+    model.compile(loss=loss, metrics=["mean_absolute_error"], optimizer=optimizer)
+    return model
+
+create_model(sequence_length=N_STEPS, n_features=len(FEATURE_COLUMNS))
 
 exit()
 
