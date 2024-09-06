@@ -29,7 +29,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, Bidirectional
+from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, LSTM, Dense, Dropout, Bidirectional, GRU, SimpleRNN
 
 #------------------------------------------------------------------------------
 # Load Data
@@ -188,38 +188,77 @@ def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['O
 # plot_boxplot_chart(data, n_days=30, columns=["High", "Low", "Open", "Close"])
 
 
-def create_model(sequence_length, n_features, units=256, cell=LSTM, n_layers=2, dropout=0.3,
-                loss="mean_absolute_error", optimizer="rmsprop", bidirectional=False):
-    model = Sequential()
-    for i in range(n_layers):
-        if i == 0:
-            # first layer
-            if bidirectional:
-                model.add(Bidirectional(cell(units, return_sequences=True), batch_input_shape=(None, sequence_length, n_features)))
-            else:
-               model.add(cell(units, return_sequences=True, batch_input_shape=(None, sequence_length, n_features)))
+def create_model(sequence_length, n_features, layer_config, loss="mean_absolute_error", optimizer="rmsprop"):
 
-        elif i == n_layers - 1:
-            # last layer
-            if bidirectional:
-                model.add(Bidirectional(cell(units, return_sequences=False)))
-            else:
-                model.add(cell(units, return_sequences=False))
+    # Initialize the model
+    model = Sequential()
+
+    # Iterate through each passed layer config
+    for i, layer in enumerate(layer_config):
+        # Extract layer type and parameters passed
+        layer_type = layer["type"]
+        units = layer.get("units", 64)
+        bidirectional = layer.get("bidirectional", False)
+        dropout = layer.get("dropout", 0.0)
+        activation = layer.get("activation", None)
+
+        # Define the cell type based on input layer_type
+        if layer_type == "LSTM":
+            cell = LSTM
+        elif layer_type == "GRU":
+            cell = GRU
+        elif layer_type == "RNN":
+            cell = SimpleRNN
         else:
-            # hidden layers
+            cell = None
+
+        # Add the first recurrent layer with a batch_input_shape
+        if i == 0 and cell:
+            if bidirectional:
+                model.add(Bidirectional(cell(units, return_sequences=True), 
+                                        batch_input_shape=(None, sequence_length, n_features)))
+            else:
+                model.add(cell(units, return_sequences=True, 
+                               batch_input_shape=(None, sequence_length, n_features)))
+        # Hidden layers
+        elif cell:  
             if bidirectional:
                 model.add(Bidirectional(cell(units, return_sequences=True)))
             else:
                 model.add(cell(units, return_sequences=True))
-        # add dropout after each layer
-        model.add(Dropout(dropout))
+
+        # Add dense layer
+        if layer_type == "Dense":
+            model.add(Dense(units, activation=activation))
+        
+        # Add dropout if specified
+        if dropout > 0:
+            model.add(Dropout(dropout))
+
+    # Add a final Dense layer with 1 unit for regression output
     model.add(Dense(1, activation="linear"))
+
+    # Compile the model
     model.compile(loss=loss, metrics=["mean_absolute_error"], optimizer=optimizer)
+
     return model
 
-model = create_model(sequence_length=N_STEPS, n_features=len(FEATURE_COLUMNS))
-print(model.evaluate(data["Open"], data.index, verbose=0))
+# Declare layers
+layers = [
+    {"type": "LSTM", "units": 256, "bidirectional": True, "dropout": 0.3},
+    {"type": "GRU", "units": 128, "bidirectional": False, "dropout": 0.2},
+    {"type": "Dense", "units": 64, "activation": "relu"}
+]
 
+# Create model
+model = create_model(
+    sequence_length=25,
+    n_features=2,
+    layer_config=layers
+)
+
+# Summarize the model
+model.summary()
 
 exit()
 
