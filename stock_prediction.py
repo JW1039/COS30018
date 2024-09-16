@@ -243,22 +243,114 @@ def create_model(sequence_length, n_features, layer_config, loss="mean_absolute_
 
     return model
 
-# Declare layers
-layers = [
-    {"type": "LSTM", "units": 256, "bidirectional": True, "dropout": 0.3},
-    {"type": "GRU", "units": 128, "bidirectional": False, "dropout": 0.2},
-    {"type": "Dense", "units": 64, "activation": "relu"}
+
+if False:
+    # Declare layers
+    layers = [
+        {"type": "LSTM", "units": 256, "bidirectional": True, "dropout": 0.3},
+        {"type": "GRU", "units": 128, "bidirectional": False, "dropout": 0.2},
+        {"type": "Dense", "units": 64, "activation": "relu"}
+    ]
+
+    # Create model
+    model = create_model(
+        sequence_length=25,
+        n_features=2,
+        layer_config=layers
+    )
+
+
+
+
+
+def train_model(model, data, sequence_length, batch_size=32, epochs=10, validation_split=0.2):
+    X, y = [], []
+    for i in range(len(data[FEATURE_COLUMNS].values) - sequence_length):
+        X.append(data[FEATURE_COLUMNS].values[i:i + sequence_length])  # Sequence of `sequence_length` time steps
+        y.append(data[FEATURE_COLUMNS].values[i + sequence_length, 0])  # Predict the next value for the first feature (Mid_Price)
+
+    # Split the data into training and validation sets
+    X_train, X_val, y_train, y_val = train_test_split(np.array(X), np.array(y), test_size=validation_split, random_state=42, shuffle=False)
+
+    # Train the model
+    history = model.fit(
+        X_train, y_train,
+        epochs=epochs,
+        batch_size=batch_size,
+        validation_data=(X_val, y_val)
+    )
+
+    return model, history
+
+
+
+training_configs = [
+    {"batch_size": 64, "epochs": 100},
+    {"batch_size": 32, "epochs": 100},
+    {"batch_size": 32, "epochs": 150}
 ]
 
-# Create model
-model = create_model(
-    sequence_length=25,
-    n_features=2,
-    layer_config=layers
-)
+layer_configs = {
+    "LSTM": [
+        {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
+        {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
+        {"type": "Dense", "units": 32, "activation": "relu"}
+    ],
+    "GRU": [
+        {"type": "GRU", "units": 128, "dropout": 0.2, "bidirectional": False},
+        {"type": "GRU", "units": 64, "dropout": 0.2, "bidirectional": False},
+        {"type": "Dense", "units": 32, "activation": "relu"}
+    ],
+    "SimpleRNN": [
+        {"type": "RNN", "units": 128, "dropout": 0.2, "bidirectional": False},
+        {"type": "RNN", "units": 64, "dropout": 0.2, "bidirectional": False},
+        {"type": "Dense", "units": 32, "activation": "relu"}
+    ]
+}
 
-# Summarize the model
-model.summary()
+# Store final validation losses for comparison
+final_validation_losses = []
+
+# run all training configs with all layer types
+for layer_config_type, layer_config in layer_configs.items():
+    for config in training_configs:
+
+        print(f"\nTraining {layer_config_type} Model")
+        # Create the model
+        model = create_model(
+            sequence_length=N_STEPS,
+            n_features=len(FEATURE_COLUMNS),
+            layer_config=layer_config
+        )
+        
+        # Train the model using the provided layers/config
+        print(f"Training with batch size {config['batch_size']} and epochs {config['epochs']}")
+        trained_model, training_history = train_model(
+            model=model,
+            data=data,
+            sequence_length=N_STEPS,
+            batch_size=config['batch_size'],
+            epochs=config['epochs']
+        )
+        
+        # Get the final validation loss and training loss values
+        final_val_loss = training_history.history['val_loss'][-1]
+        final_train_loss = training_history.history['loss'][-1]
+        
+        # Append results to the list
+        final_validation_losses.append({
+            "model": layer_config_type,
+            "batch_size": config['batch_size'],
+            "epochs": config['epochs'],
+            "training_loss": final_train_loss,
+            "validation_loss": final_val_loss
+        })
+
+# Print the final training and validation losses for each model and configuration
+print("\nFinal Training and Validation Losses:")
+for result in final_validation_losses:
+    print(f"Model: {result['model']}, Batch Size: {result['batch_size']}, Epochs: {result['epochs']}, "
+          f"Training Loss: {result['training_loss']:.4f}, Validation Loss: {result['validation_loss']:.4f}")
 
 exit()
 
