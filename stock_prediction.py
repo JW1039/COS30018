@@ -31,6 +31,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, LSTM, Dense, Dropout, Bidirectional, GRU, SimpleRNN
 
+
 #------------------------------------------------------------------------------
 # Load Data
 ## TO DO:
@@ -62,6 +63,8 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 # 3) Change the Prediction days
 #------------------------------------------------------------------------------
 
+scaler = MinMaxScaler()
+
 
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
                      scale=False, feature_columns=None, save_local=True, 
@@ -88,6 +91,7 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
             df.to_csv(local_file)
             print(f"Data saved to {local_file}.")
     
+    print(df)
     # Calculate the mid-point of Open & Close prices
     df['Mid_Price'] = (df['Open'] + df['Close']) / 2
     
@@ -95,7 +99,7 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     if handle_nan == 'drop':
         df.dropna(inplace=True)
     elif handle_nan == 'fill':
-        df.fillna(method='ffill', inplace=True)
+        df.ffill(inplace=True)
     
     # Scaling features
     if scale:
@@ -104,7 +108,6 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
         scalers = {}
         for column in feature_columns:
             if column in df.columns:
-                scaler = MinMaxScaler()
                 df[column] = scaler.fit_transform(df[[column]])
                 scalers[column] = scaler
             else:
@@ -114,7 +117,7 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     return df
 
 
-FEATURE_COLUMNS = ['Mid_Price', 'Volume']
+FEATURE_COLUMNS = ['Mid_Price','Close']
 N_STEPS = 25
 
 
@@ -283,74 +286,195 @@ def train_model(model, data, sequence_length, batch_size=32, epochs=10, validati
     return model, history
 
 
+if False:
+    training_configs = [
+        {"batch_size": 64, "epochs": 100},
+        {"batch_size": 32, "epochs": 100},
+        {"batch_size": 32, "epochs": 150}
+    ]
 
-training_configs = [
-    {"batch_size": 64, "epochs": 100},
-    {"batch_size": 32, "epochs": 100},
-    {"batch_size": 32, "epochs": 150}
+    layer_configs = {
+        "LSTM": [
+            {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
+            {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
+            {"type": "Dense", "units": 32, "activation": "relu"}
+        ],
+        "GRU": [
+            {"type": "GRU", "units": 128, "dropout": 0.2, "bidirectional": False},
+            {"type": "GRU", "units": 64, "dropout": 0.2, "bidirectional": False},
+            {"type": "Dense", "units": 32, "activation": "relu"}
+        ],
+        "SimpleRNN": [
+            {"type": "RNN", "units": 128, "dropout": 0.2, "bidirectional": False},
+            {"type": "RNN", "units": 64, "dropout": 0.2, "bidirectional": False},
+            {"type": "Dense", "units": 32, "activation": "relu"}
+        ]
+    }
+
+    # Store final validation losses for comparison
+    final_validation_losses = []
+
+    # run all training configs with all layer types
+    for layer_config_type, layer_config in layer_configs.items():
+        for config in training_configs:
+
+            print(f"\nTraining {layer_config_type} Model")
+            # Create the model
+            model = create_model(
+                sequence_length=N_STEPS,
+                n_features=len(FEATURE_COLUMNS),
+                layer_config=layer_config
+            )
+            
+            # Train the model using the provided layers/config
+            print(f"Training with batch size {config['batch_size']} and epochs {config['epochs']}")
+            trained_model, training_history = train_model(
+                model=model,
+                data=data,
+                sequence_length=N_STEPS,
+                batch_size=config['batch_size'],
+                epochs=config['epochs']
+            )
+            
+            # Get the final validation loss and training loss values
+            final_val_loss = training_history.history['val_loss'][-1]
+            final_train_loss = training_history.history['loss'][-1]
+            
+            # Append results to the list
+            final_validation_losses.append({
+                "model": layer_config_type,
+                "batch_size": config['batch_size'],
+                "epochs": config['epochs'],
+                "training_loss": final_train_loss,
+                "validation_loss": final_val_loss
+            })
+
+    # Print the final training and validation losses for each model and configuration
+    print("\nFinal Training and Validation Losses:")
+    for result in final_validation_losses:
+        print(f"Model: {result['model']}, Batch Size: {result['batch_size']}, Epochs: {result['epochs']}, "
+            f"Training Loss: {result['training_loss']:.4f}, Validation Loss: {result['validation_loss']:.4f}")
+
+
+
+# Number of days to predict into the future (multistep)
+k_steps = 5  # Predict the next 5 days
+
+# Sequence length (number of past days used for prediction)
+sequence_length = 25
+
+# Prepare the data using existing functions
+data = clean_stock_data(
+    ticker=COMPANY,
+    start_date='2020-01-01',
+    end_date='2023-07-31',
+    handle_nan='fill',
+    scale=True,
+    feature_columns=FEATURE_COLUMNS
+)
+
+# Use the existing function to create sequences for multivariate, multistep prediction
+X, y = [], []
+for i in range(len(data) - sequence_length - k_steps + 1):
+    X.append(data[FEATURE_COLUMNS].values[i:i + sequence_length])  # Multivariate input
+    y.append(data['Close'].values[i + sequence_length:i + sequence_length + k_steps])  # Multistep output
+
+X = np.array(X)
+y = np.array(y)
+
+# Define the model using the existing function
+layer_config = [
+    {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
+    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
+    {"type": "Dense", "units": 32, "activation": "relu"}
 ]
 
-layer_configs = {
-    "LSTM": [
-        {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
-        {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
-        {"type": "Dense", "units": 32, "activation": "relu"}
-    ],
-    "GRU": [
-        {"type": "GRU", "units": 128, "dropout": 0.2, "bidirectional": False},
-        {"type": "GRU", "units": 64, "dropout": 0.2, "bidirectional": False},
-        {"type": "Dense", "units": 32, "activation": "relu"}
-    ],
-    "SimpleRNN": [
-        {"type": "RNN", "units": 128, "dropout": 0.2, "bidirectional": False},
-        {"type": "RNN", "units": 64, "dropout": 0.2, "bidirectional": False},
-        {"type": "Dense", "units": 32, "activation": "relu"}
-    ]
-}
+# Create the model for multivariate, multistep prediction
+model = create_model(sequence_length=sequence_length, n_features=len(FEATURE_COLUMNS), layer_config=layer_config)
 
-# Store final validation losses for comparison
-final_validation_losses = []
+# Train the model using the existing function
+trained_model, training_history = train_model(
+    model=model,
+    data=data,
+    sequence_length=sequence_length,
+    batch_size=32,
+    epochs=2
+)
 
-# run all training configs with all layer types
-for layer_config_type, layer_config in layer_configs.items():
-    for config in training_configs:
+# Print the final validation loss
+final_val_loss = training_history.history['val_loss'][-1]
+print(f"Final Validation Loss: {final_val_loss:.4f}")
 
-        print(f"\nTraining {layer_config_type} Model")
-        # Create the model
-        model = create_model(
-            sequence_length=N_STEPS,
-            n_features=len(FEATURE_COLUMNS),
-            layer_config=layer_config
-        )
+
+# Make predictions k_days into the future given sequence length and feature columns
+def make_predictions(model, data, k_days, sequence_length, feature_columns):
+
+    # Prepare the most recent sequence of data from feature columns as input for prediction
+    last_sequence = data[feature_columns].values[-sequence_length:]
+    
+    # Reshape the sequence to fit the model's batch_input_shape
+    last_sequence = np.expand_dims(last_sequence, axis=0)
+    
+    predictions = []
+    
+    for i in range(k_days):
+        # Predict the next closing price
+        next_pred = model.predict(last_sequence,verbose=0)
+        # Get the predicted closing price
+        next_pred_value = next_pred[0, 0]         
+        predictions.append(next_pred_value)
         
-        # Train the model using the provided layers/config
-        print(f"Training with batch size {config['batch_size']} and epochs {config['epochs']}")
-        trained_model, training_history = train_model(
-            model=model,
-            data=data,
-            sequence_length=N_STEPS,
-            batch_size=config['batch_size'],
-            epochs=config['epochs']
-        )
+        # Shift the sequence forward by removing the first timestep and add the predicted closing price
+        new_sequence = np.copy(last_sequence[:, 1:, :]) 
         
-        # Get the final validation loss and training loss values
-        final_val_loss = training_history.history['val_loss'][-1]
-        final_train_loss = training_history.history['loss'][-1]
-        
-        # Append results to the list
-        final_validation_losses.append({
-            "model": layer_config_type,
-            "batch_size": config['batch_size'],
-            "epochs": config['epochs'],
-            "training_loss": final_train_loss,
-            "validation_loss": final_val_loss
-        })
+        # Replace the closing price (last feature column) in the new sequence with the predicted value
+        # and get the last timestep from the original sequence
+        last_timestep = last_sequence[:, -1:, :]  
+        # get last feature
+        last_timestep[0, 0, -1] = next_pred_value.item()
+        # Join the updated last timestep to the new sequence along time axis
+        new_sequence = np.concatenate([new_sequence, last_timestep], axis=1) 
+        # Update last_sequence for the next iteration
+        last_sequence = new_sequence  
+    
+    # Convert the list of predictions to a numpy array
+    predictions = np.array(predictions).reshape(-1, 1)
+    
+    # Inverse scale the predictions to get the actual closing prices
+    predictions = scaler.inverse_transform(predictions)
+    
+    return predictions
 
-# Print the final training and validation losses for each model and configuration
-print("\nFinal Training and Validation Losses:")
-for result in final_validation_losses:
-    print(f"Model: {result['model']}, Batch Size: {result['batch_size']}, Epochs: {result['epochs']}, "
-          f"Training Loss: {result['training_loss']:.4f}, Validation Loss: {result['validation_loss']:.4f}")
+
+prediction_columns = [
+    {'Days': 7, 'Columns': ['Open', 'Close']},
+    {'Days': 30, 'Columns': ['Adj Close', 'Close']},
+    {'Days': 14, 'Columns': ['High', 'Low']},
+    {'Days': 21, 'Columns': ['Volume', 'Close']}
+]
+
+for config in prediction_columns:
+    k_days = config['Days']
+    feature_columns = config['Columns']
+
+    # Perform prediction using the specified columns and k_days
+    predictions = make_predictions(
+        model=trained_model,
+        data=data,
+        k_days=k_days,
+        sequence_length=sequence_length,
+        feature_columns=feature_columns
+    )
+
+    print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
+
+    print(f"{'Day':<10}{'Predicted Closing Price':<30}")
+
+    # Loop through the predictions and print each day and prediction
+    for i in range(k_days):
+        predicted_value = predictions[i].item()
+        print(f"Day {i+1:<7} {predicted_value:<30.4f}")
+
 
 exit()
 
