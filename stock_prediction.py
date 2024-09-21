@@ -29,7 +29,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, LSTM, Dense, Dropout, Bidirectional, GRU, SimpleRNN
+from tensorflow.keras.layers import Dense, Dropout, LSTM, Masking, LSTM, Dense, Dropout, Bidirectional, GRU, SimpleRNN
 
 
 #------------------------------------------------------------------------------
@@ -62,8 +62,7 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 # 2) Use a different price value eg. mid-point of Open & Close
 # 3) Change the Prediction days
 #------------------------------------------------------------------------------
-
-scaler = MinMaxScaler()
+scalers = {}
 
 
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
@@ -91,7 +90,6 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
             df.to_csv(local_file)
             print(f"Data saved to {local_file}.")
     
-    print(df)
     # Calculate the mid-point of Open & Close prices
     df['Mid_Price'] = (df['Open'] + df['Close']) / 2
     
@@ -105,11 +103,11 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     if scale:
         if feature_columns is None:
             feature_columns = df.columns.tolist()
-        scalers = {}
         for column in feature_columns:
             if column in df.columns:
-                df[column] = scaler.fit_transform(df[[column]])
-                scalers[column] = scaler
+                mmx_scaler = MinMaxScaler()
+                df[column] = mmx_scaler.fit_transform(df[[column]])
+                scalers[column] = mmx_scaler
             else:
                 raise KeyError(f"Column '{column}' not found in data.")
     
@@ -117,7 +115,7 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     return df
 
 
-FEATURE_COLUMNS = ['Mid_Price','Close']
+FEATURE_COLUMNS = ['Close','Open','Mid_Price']
 N_STEPS = 25
 
 
@@ -409,7 +407,6 @@ print(f"Final Validation Loss: {final_val_loss:.4f}")
 # Make predictions k_days into the future given sequence length and feature columns
 def make_predictions(model, data, k_days, sequence_length, feature_columns, prediction_column="Close"):
 
-    # Prepare the most recent sequence of data from feature columns as input for prediction
     last_sequence = data[feature_columns].values[-sequence_length:]
     # Reshape the sequence to fit the model's batch_input_shape
     last_sequence = np.expand_dims(last_sequence, axis=0)
@@ -417,7 +414,7 @@ def make_predictions(model, data, k_days, sequence_length, feature_columns, pred
     predictions = []
 
     # Store the final 7 days of input data for the Adj Close column
-    final_7_days = scaler.inverse_transform(data[prediction_column].values[-7:].reshape(-1, 1))
+    final_7_days = scalers[prediction_column].inverse_transform(data[prediction_column].values[-7:].reshape(-1, 1))
     
     # Find the index of the closing price column in the feature columns
     closing_price_index = feature_columns.index(prediction_column)
@@ -448,44 +445,72 @@ def make_predictions(model, data, k_days, sequence_length, feature_columns, pred
     predictions = np.array(predictions).reshape(-1, 1)
     
     # Inverse scale the predictions to get the actual closing prices
-    predictions = scaler.inverse_transform(predictions)
+    predictions = scalers[prediction_column].inverse_transform(predictions)
     
     return predictions, final_7_days
 
 
-prediction_columns = [
-    {'Days': 7, 'Columns': ['Open', 'Close']},
-    {'Days': 30, 'Columns': ['Adj Close', 'Close']},
-    {'Days': 14, 'Columns': ['High', 'Low','Close']},
-    {'Days': 21, 'Columns': ['Volume', 'Close']}
-]
+k_days = 14
 
-for config in prediction_columns:
-    k_days = config['Days']
-    feature_columns = config['Columns']
+# Perform prediction using the specified columns and k_days
+predictions, final_days = make_predictions(
+    model=trained_model,
+    data=data,
+    k_days=k_days,
+    sequence_length=sequence_length,
+    feature_columns=FEATURE_COLUMNS
+)
 
-    # Perform prediction using the specified columns and k_days
-    predictions, final_days = make_predictions(
-        model=trained_model,
-        data=data,
-        k_days=k_days,
-        sequence_length=sequence_length,
-        feature_columns=feature_columns
-    )
+print(f"\nPredictions for the next {k_days} days using columns {FEATURE_COLUMNS}:")
 
-    print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
+print(f"{'Day':<10}{'Predicted Closing Price':<30}")
 
-    print(f"{'Day':<10}{'Predicted Closing Price':<30}")
+# Loop through the predictions and print each day and prediction
+for idx, obj in enumerate(final_days):
+    day = obj.item()
+    print(f"Day {(0-(len(final_days)-idx)):<7} {day:<30.4f}")
 
-    # Loop through the predictions and print each day and prediction
-    for idx, obj in enumerate(final_days):
-        day = obj.item()
-        print(f"Day {(0-(len(final_days)-idx)):<7} {day:<30.4f}")
+# Loop through the predictions and print each day and prediction
+for i in range(k_days):
+    predicted_value = predictions[i].item()
+    print(f"Day {i+1:<7} {predicted_value:<30.4f}")
 
-    # Loop through the predictions and print each day and prediction
-    for i in range(k_days):
-        predicted_value = predictions[i].item()
-        print(f"Day {i+1:<7} {predicted_value:<30.4f}")
+
+
+if False:
+    prediction_columns = [
+        {'Days': 7, 'Columns': ['Open', 'Close']},
+        {'Days': 30, 'Columns': ['Adj Close', 'Close']},
+        {'Days': 14, 'Columns': ['High', 'Low','Close']},
+        {'Days': 21, 'Columns': ['Volume', 'Close']}
+    ]
+
+    for config in prediction_columns:
+        k_days = config['Days']
+        feature_columns = config['Columns']
+
+        # Perform prediction using the specified columns and k_days
+        predictions, final_days = make_predictions(
+            model=trained_model,
+            data=data,
+            k_days=k_days,
+            sequence_length=sequence_length,
+            feature_columns=feature_columns
+        )
+
+        print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
+
+        print(f"{'Day':<10}{'Predicted Closing Price':<30}")
+
+        # Loop through the predictions and print each day and prediction
+        for idx, obj in enumerate(final_days):
+            day = obj.item()
+            print(f"Day {(0-(len(final_days)-idx)):<7} {day:<30.4f}")
+
+        # Loop through the predictions and print each day and prediction
+        for i in range(k_days):
+            predicted_value = predictions[i].item()
+            print(f"Day {i+1:<7} {predicted_value:<30.4f}")
 
 
 exit()
