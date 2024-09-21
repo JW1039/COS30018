@@ -398,7 +398,7 @@ trained_model, training_history = train_model(
     data=data,
     sequence_length=sequence_length,
     batch_size=32,
-    epochs=2
+    epochs=50
 )
 
 # Print the final validation loss
@@ -407,19 +407,24 @@ print(f"Final Validation Loss: {final_val_loss:.4f}")
 
 
 # Make predictions k_days into the future given sequence length and feature columns
-def make_predictions(model, data, k_days, sequence_length, feature_columns):
+def make_predictions(model, data, k_days, sequence_length, feature_columns, prediction_column="Close"):
 
     # Prepare the most recent sequence of data from feature columns as input for prediction
     last_sequence = data[feature_columns].values[-sequence_length:]
-    
     # Reshape the sequence to fit the model's batch_input_shape
     last_sequence = np.expand_dims(last_sequence, axis=0)
     
     predictions = []
+
+    # Store the final 7 days of input data for the Adj Close column
+    final_7_days = scaler.inverse_transform(data[prediction_column].values[-7:].reshape(-1, 1))
+    
+    # Find the index of the closing price column in the feature columns
+    closing_price_index = feature_columns.index(prediction_column)
     
     for i in range(k_days):
         # Predict the next closing price
-        next_pred = model.predict(last_sequence,verbose=0)
+        next_pred = model.predict(last_sequence, verbose=0)
         # Get the predicted closing price
         next_pred_value = next_pred[0, 0]         
         predictions.append(next_pred_value)
@@ -427,13 +432,15 @@ def make_predictions(model, data, k_days, sequence_length, feature_columns):
         # Shift the sequence forward by removing the first timestep and add the predicted closing price
         new_sequence = np.copy(last_sequence[:, 1:, :]) 
         
-        # Replace the closing price (last feature column) in the new sequence with the predicted value
-        # and get the last timestep from the original sequence
-        last_timestep = last_sequence[:, -1:, :]  
-        # get last feature
-        last_timestep[0, 0, -1] = next_pred_value.item()
+        # Replace the closing price in the new sequence with the predicted value
+        last_timestep = last_sequence[:, -1:, :]
+        
+        # Dynamically update the column corresponding to the closing price
+        last_timestep[0, 0, closing_price_index] = next_pred_value.item()
+        
         # Join the updated last timestep to the new sequence along time axis
-        new_sequence = np.concatenate([new_sequence, last_timestep], axis=1) 
+        new_sequence = np.concatenate([new_sequence, last_timestep], axis=1)
+        
         # Update last_sequence for the next iteration
         last_sequence = new_sequence  
     
@@ -443,13 +450,13 @@ def make_predictions(model, data, k_days, sequence_length, feature_columns):
     # Inverse scale the predictions to get the actual closing prices
     predictions = scaler.inverse_transform(predictions)
     
-    return predictions
+    return predictions, final_7_days
 
 
 prediction_columns = [
     {'Days': 7, 'Columns': ['Open', 'Close']},
     {'Days': 30, 'Columns': ['Adj Close', 'Close']},
-    {'Days': 14, 'Columns': ['High', 'Low']},
+    {'Days': 14, 'Columns': ['High', 'Low','Close']},
     {'Days': 21, 'Columns': ['Volume', 'Close']}
 ]
 
@@ -458,7 +465,7 @@ for config in prediction_columns:
     feature_columns = config['Columns']
 
     # Perform prediction using the specified columns and k_days
-    predictions = make_predictions(
+    predictions, final_days = make_predictions(
         model=trained_model,
         data=data,
         k_days=k_days,
@@ -469,6 +476,11 @@ for config in prediction_columns:
     print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
 
     print(f"{'Day':<10}{'Predicted Closing Price':<30}")
+
+    # Loop through the predictions and print each day and prediction
+    for idx, obj in enumerate(final_days):
+        day = obj.item()
+        print(f"Day {(0-(len(final_days)-idx)):<7} {day:<30.4f}")
 
     # Loop through the predictions and print each day and prediction
     for i in range(k_days):
