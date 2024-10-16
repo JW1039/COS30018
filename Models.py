@@ -4,7 +4,7 @@ from tensorflow.keras.layers import Dense, Dropout, LSTM, Masking, LSTM, Dense, 
 import numpy as np
 from sklearn.model_selection import train_test_split
 import pmdarima as pm
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from constants import *
 
 class Model():
@@ -92,6 +92,52 @@ class NeuralNetworkModel(Model):
         )
 
         return history
+
+    def predict_multivariate(self):
+        last_sequence = self.Data[FEATURE_COLUMNS].values[-SEQUENCE_LENGTH:]
+        last_sequence = np.expand_dims(last_sequence, axis=0)
+
+        # Predict based on all features in FEATURE_COLUMNS
+        next_pred = self.Model.predict(last_sequence, verbose=0)
+
+        # Reshape predictions to 2D if necessary (e.g., from shape (1, 1, X) to (1, X))
+        next_pred_reshaped = next_pred.reshape(-1, 1)
+
+        # Handle inverse scaling for the predicted column
+        predictions = SCALERS[PREDICTION_COLUMN].inverse_transform(next_pred_reshaped)
+
+        return predictions
+
+
+    def predict_multistep(self, k_days):
+        last_sequence = self.Data[FEATURE_COLUMNS].values[-SEQUENCE_LENGTH:]
+        last_sequence = np.expand_dims(last_sequence, axis=0)
+        
+        predictions = []
+        closing_price_index = FEATURE_COLUMNS.index(PREDICTION_COLUMN)
+
+        for i in range(k_days):
+            next_pred = self.Model.predict(last_sequence, verbose=0)
+            next_pred_value = next_pred[0, 0]
+            predictions.append(next_pred_value)
+            
+            new_sequence = np.copy(last_sequence[:, 1:, :])
+            last_timestep = last_sequence[:, -1:, :]
+            
+            last_timestep[0, 0, closing_price_index] = next_pred_value.item()
+            new_sequence = np.concatenate([new_sequence, last_timestep], axis=1)
+            
+            last_sequence = new_sequence
+        
+        # Convert predictions to a 2D array for inverse_transform
+        predictions = np.array(predictions).reshape(-1, 1)
+        
+        # Inverse scale the predictions to get the actual closing prices
+        predictions = SCALERS[PREDICTION_COLUMN].inverse_transform(predictions)
+
+        return predictions
+
+
 
     def predict(self, k_days):
         

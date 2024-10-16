@@ -367,41 +367,85 @@ def ensemble_predictions(models, k_steps):
 
 
 
-if False:
-    prediction_columns = [
-        {'Days': 7, 'Columns': ['Open', 'Close']},
-        {'Days': 30, 'Columns': ['Adj Close', 'Close']},
-        {'Days': 14, 'Columns': ['High', 'Low','Close']},
-        {'Days': 21, 'Columns': ['Volume', 'Close']}
-    ]
+prediction_columns = [
+    {'Days': 7, 'Columns': ['Open', 'Close']},
+    {'Days': 30, 'Columns': ['Adj Close', 'Close']},
+    {'Days': 14, 'Columns': ['High', 'Low','Close']},
+    {'Days': 21, 'Columns': ['Volume', 'Close']}
+]
 
-    for config in prediction_columns:
-        k_days = config['Days']
-        feature_columns = config['Columns']
+# define the layer configuration for LSTM model
+layer_config = [
+    {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
+    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
+    {"type": "Dense", "units": 32, "activation": "relu"}
+]
+# Initialize the Neural Network Model (LSTM/GRU/RNN)
+nn_model = NeuralNetworkModel(data=data, sequence_length=SEQUENCE_LENGTH, n_features=len(FEATURE_COLUMNS), layer_config=layer_config)
 
-        # Perform prediction using the specified columns and k_days
-        predictions, final_days = make_predictions(
-            model=trained_model,
-            data=data,
-            k_days=k_days,
-            sequence_length=SEQUENCE_LENGTH,
-            feature_columns=feature_columns
-        )
+# Train the model
+nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=50)
 
-        print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
 
-        print(f"{'Day':<10}{'Predicted Closing Price':<30}")
 
-        # Loop through the predictions and print each day and prediction
-        for idx, obj in enumerate(final_days):
-            day = obj.item()
-            print(f"Day {(0-(len(final_days)-idx)):<7} {day:<30.4f}")
+for config in prediction_columns:
+    k_days = config['Days']
+    feature_columns = config['Columns']
 
-        # Loop through the predictions and print each day and prediction
-        for i in range(k_days):
-            predicted_value = predictions[i].item()
-            print(f"Day {i+1:<7} {predicted_value:<30.4f}")
+    # Perform prediction using the multistep method
+    predictions = nn_model.predict_multistep(k_days)
 
+    # Check if predictions were generated
+    if predictions.size == 0:
+        print(f"No predictions were generated for {feature_columns}. Skipping plot.")
+        continue
+
+    # Print Predictions
+    print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
+    for i, prediction in enumerate(predictions):
+        predicted_value = prediction.item()
+        print(f"Day {i+1:<7} {predicted_value:<30.4f}")
+
+    # Inverse transform the actual data to bring it back to the original scale
+    actual_scaled = data[PREDICTION_COLUMN].values.reshape(-1, 1)  # Reshape to 2D for inverse_transform
+    actual = SCALERS[PREDICTION_COLUMN].inverse_transform(actual_scaled).flatten()  # Flatten back to 1D after scaling
+
+    # Take the last 'k_days' of the actual data for comparison
+    actual_last_days = actual[-k_days:]
+
+    # Debugging step: Print min/max values of actual and predicted for comparison
+    print(f"Actual min/max after inverse scaling: {actual_last_days.min()}/{actual_last_days.max()}")
+    print(f"Predicted min/max: {predictions.min()}/{predictions.max()}")
+
+    # Create a continuous time axis for both actual and predicted data
+    time_actual = np.arange(k_days)  # First 'k_days' time steps for actual
+    time_pred = np.arange(k_days, 2 * k_days)  # Next 'k_days' time steps for predictions
+
+    plt.figure(figsize=(10, 6))
+    
+    # Plot the last 'k_days' of actual data
+    plt.plot(time_actual, actual_last_days, label="Actual")
+
+    # Plot predictions starting directly after the actual data
+    plt.plot(time_pred, predictions, label="Predicted", linestyle='--')
+
+    # Customize the plot
+    plt.title(f"Prediction vs Actual Data ({len(feature_columns)} features, {k_days} days)")
+    plt.xlabel("Time")
+    plt.ylabel("Closing Price")
+    plt.legend()
+
+    # Set the same y-limits for better visualization
+    plt.ylim([min(actual_last_days.min(), predictions.min()), max(actual_last_days.max(), predictions.max())])
+
+    plt.show()
+
+
+
+
+
+
+exit()
 
 # Create sequences for multivariate & multistep prediction
 X, y = [], []
@@ -439,22 +483,23 @@ lstm_predictions = nn_model.predict(K_STEPS)
 sarima_predictions = sarima_model.predict(K_STEPS)
 rf_predictions = rf_model.predict(K_STEPS)
 
+k_steps = 7
 
 # Store the final 7 days of input data for the Close column
-last_7 = SCALERS[PREDICTION_COLUMN].inverse_transform(data[PREDICTION_COLUMN].values[-7:].reshape(-1, 1)).reshape(-1)
+last_steps = SCALERS[PREDICTION_COLUMN].inverse_transform(data[PREDICTION_COLUMN].values[-k_steps:].reshape(-1, 1)).reshape(-1)
 
 
 models = [
-    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.5},
-    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.7},
-    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.7}
+    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.9},
+    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.1},
+    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.1}
 ]
 
 # Get ensemble predictions
-ensemble_pred = ensemble_predictions(models, 7)
+ensemble_pred = ensemble_predictions(models, k_steps)
 
 #  print predictions
-print(f"Last 7 days: {last_7}")
+print(f"Last 7 days: {last_steps}")
 print(f"Ensemble predictions: {ensemble_pred}")
 
 
