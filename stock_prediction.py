@@ -177,7 +177,7 @@ def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['O
     # define labels for x and y axis
     plt.ylabel("Price")
     plt.xlabel("Price Categories")
-    plt.show()
+   # plt.show()
 
 # plot_boxplot_chart(data, n_days=30, columns=["High", "Low", "Open", "Close"])
 
@@ -338,9 +338,7 @@ def ensemble_predictions(models, k_steps):
         # Store the weighted predictions
         predictions.append(weight * predictions_model[:k_steps])
 
-    # trim predictions to ensure even length
-    min_length = min([len(p) for p in predictions])  
-    predictions = [p[:min_length] for p in predictions]
+
 
     # Combine predictions (weighted sum)
     combined_predictions = np.sum(predictions, axis=0) / total_weight
@@ -396,39 +394,35 @@ for config in prediction_columns:
         predicted_value = prediction.item()
         print(f"Day {i+1:<7} {predicted_value:<30.4f}")
 
-    # Inverse transform the actual data to bring it back to the original scale
-    actual_scaled = data[PREDICTION_COLUMN].values.reshape(-1, 1)  # Reshape to 2D for inverse_transform
-    actual = SCALERS[PREDICTION_COLUMN].inverse_transform(actual_scaled).flatten()  # Flatten back to 1D after scaling
+    if False:
+        # Inverse transform the actual data to bring it back to the original scale
+        actual_scaled = data[PREDICTION_COLUMN].values.reshape(-1, 1)  # Reshape to 2D for inverse_transform
+        actual = SCALERS[PREDICTION_COLUMN].inverse_transform(actual_scaled).flatten()  # Flatten back to 1D after scaling
 
-    # Take the actual data from middle_idx to middle_idx + k_days for comparison
-    actual_future_days = actual[middle_idx:middle_idx + k_days]
+        # Take the actual data from middle_idx to middle_idx + k_days for comparison
+        actual_future_days = actual[middle_idx:middle_idx + k_days]
 
-    # Create a date range for plotting
-    prediction_dates = data.index[middle_idx:middle_idx + k_days]
+        # Create a date range for plotting
+        prediction_dates = data.index[middle_idx:middle_idx + k_days]
 
-    plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(10, 6))
 
-    # Plot the actual data
-    plt.plot(prediction_dates, actual_future_days, label="Actual")
+        # Plot the actual data
+        plt.plot(prediction_dates, actual_future_days, label="Actual")
 
-    # Plot predictions
-    plt.plot(prediction_dates, predictions.flatten(), label="Predicted", linestyle='--')
+        # Plot predictions
+        plt.plot(prediction_dates, predictions.flatten(), label="Predicted", linestyle='--')
 
-    # Customize the plot
-    plt.title(f"Prediction vs Actual Data {feature_columns} features, {k_days} days starting from {start_date.date()})")
-    plt.xlabel("Date")
-    plt.ylabel("Closing Price")
-    plt.legend()
+        # Customize the plot
+        plt.title(f"Prediction vs Actual Data {feature_columns} features, {k_days} days starting from {start_date.date()})")
+        plt.xlabel("Date")
+        plt.ylabel("Closing Price")
+        plt.legend()
 
-    plt.show()
-
-
-
+        plt.show()
 
 
 
-
-exit()
 
 # Create sequences for multivariate & multistep prediction
 X, y = [], []
@@ -439,16 +433,6 @@ for i in range(len(data) - SEQUENCE_LENGTH - K_STEPS + 1):
 X = np.array(X)
 y = np.array(y)
 
-# define the layer configuration for LSTM model
-layer_config = [
-    {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
-    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
-    {"type": "Dense", "units": 32, "activation": "relu"}
-]
-
-# train Neural Network Model (LSTM/GRU/RNN)
-nn_model = NeuralNetworkModel(data=data, sequence_length=SEQUENCE_LENGTH, n_features=len(FEATURE_COLUMNS), layer_config=layer_config)
-nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=50)
 
 # train SARIMA Model
 sarima_model = SarimaModel(data)
@@ -466,25 +450,53 @@ lstm_predictions = nn_model.predict(K_STEPS)
 sarima_predictions = sarima_model.predict(K_STEPS)
 rf_predictions = rf_model.predict(K_STEPS)
 
-k_steps = 7
-
 # Store the final 7 days of input data for the Close column
-last_steps = SCALERS[PREDICTION_COLUMN].inverse_transform(data[PREDICTION_COLUMN].values[-k_steps:].reshape(-1, 1)).reshape(-1)
+last_steps = SCALERS[PREDICTION_COLUMN].inverse_transform(data[PREDICTION_COLUMN].values[-K_STEPS:].reshape(-1, 1)).reshape(-1)
 
 
 models = [
-    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.9},
-    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.1},
-    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.1}
+    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.4},
+    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.6},
+    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.8}
 ]
 
 # Get ensemble predictions
-ensemble_pred = ensemble_predictions(models, k_steps)
+ensemble_pred = ensemble_predictions(models, K_STEPS)
 
 #  print predictions
 print(f"Last 7 days: {last_steps}")
 print(f"Ensemble predictions: {ensemble_pred}")
 
+
+# Ensure the actual values are sliced to the last K_STEPS
+actual_last_steps = last_steps[-K_STEPS:]
+
+# Check that the lengths match K_STEPS
+if len(lstm_predictions) != K_STEPS or len(ensemble_pred) != K_STEPS:
+    raise ValueError("Prediction lengths must match K_STEPS.")
+
+# Create a time range for the x-axis
+time_range = np.arange(K_STEPS)
+
+# Plot the actual values
+plt.figure(figsize=(12, 6))
+plt.plot(time_range, actual_last_steps, label="Actual", marker='o')
+
+# Plot the LSTM model's predicted values
+plt.plot(time_range, lstm_predictions, label="LSTM Predictions", linestyle='--', marker='x')
+
+# Plot the Ensemble model's predicted values
+plt.plot(time_range, ensemble_pred, label="Ensemble Predictions", linestyle='-.', marker='s')
+
+# Customize the plot
+plt.title("Actual vs. Predicted Values (LSTM and Ensemble Model)")
+plt.xlabel("Days")
+plt.ylabel("Closing Price")
+plt.legend()
+plt.grid(True)
+
+# Show the plot
+plt.show()
 
 
 exit()
