@@ -40,11 +40,7 @@ from Models import *
 # If so, load the saved data
 # If not, save the data into a directory
 #------------------------------------------------------------------------------
-# DATA_SOURCE = "yahoo"
-COMPANY = 'CBA.AX'
 
-TRAIN_START = '2020-01-01'     # Start date to read
-TRAIN_END = '2023-08-01'       # End date to read
 
 # data = web.DataReader(COMPANY, DATA_SOURCE, TRAIN_START, TRAIN_END) # Read data using yahoo
 
@@ -68,7 +64,7 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
                      scale=False, feature_columns=None, save_local=True, 
                      load_local=True, local_dir='data'):
-    
+       
     # Local file path
     local_file = os.path.join(local_dir, f"{ticker}_{start_date}_{end_date}.csv")
     
@@ -104,12 +100,10 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
         if feature_columns is None:
             feature_columns = df.columns.tolist()
         for column in feature_columns:
-            if column in df.columns:
-                mmx_scaler = MinMaxScaler()
-                df[column] = mmx_scaler.fit_transform(df[[column]])
-                SCALERS[column] = mmx_scaler
-            else:
-                raise KeyError(f"Column '{column}' not found in data.")
+            mmx_scaler = MinMaxScaler()
+            df[column] = mmx_scaler.fit_transform(df[[column]])
+            SCALERS[column] = mmx_scaler
+
     
     # Return the cleaned DataFrame
     return df
@@ -120,14 +114,14 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
 
 data = clean_stock_data(
     ticker=COMPANY,
-    start_date='2020-01-01',
-    end_date='2023-07-31',
+    start_date=TRAIN_START,
+    end_date=TRAIN_END,
     handle_nan='fill',
     scale=True,
     feature_columns=FEATURE_COLUMNS
 )
 
-
+print(data)
 # plot a candlestick chart given a DataFrame
 def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
 
@@ -284,18 +278,6 @@ if False:
 
 
 
-# Prepare the data using existing functions
-data = clean_stock_data(
-    ticker=COMPANY,
-    start_date='2020-01-01',
-    end_date='2023-07-31',
-    handle_nan='fill',
-    scale=True,
-    feature_columns=FEATURE_COLUMNS
-)
-
-
-
 # train model
 if False:
     # Train the model using the existing function
@@ -368,32 +350,40 @@ def ensemble_predictions(models, k_steps):
 
 
 prediction_columns = [
-    {'Days': 7, 'Columns': ['Open', 'Close']},
-    {'Days': 30, 'Columns': ['Adj Close', 'Close']},
-    {'Days': 14, 'Columns': ['High', 'Low','Close']},
-    {'Days': 21, 'Columns': ['Volume', 'Close']}
+    {'Days': 30, 'Columns': FEATURE_COLUMNS},
 ]
 
-# define the layer configuration for LSTM model
 layer_config = [
-    {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": False},
-    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
-    {"type": "Dense", "units": 32, "activation": "relu"}
+    {"type": "LSTM", "units": 128, "dropout": 0.2, "bidirectional": True},
+    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False}, 
+    {"type": "Dense", "units": 64, "activation": "relu"},
+    {"type": "Dense", "units": 32, "activation": "relu"}         
 ]
+
 # Initialize the Neural Network Model (LSTM/GRU/RNN)
 nn_model = NeuralNetworkModel(data=data, sequence_length=SEQUENCE_LENGTH, n_features=len(FEATURE_COLUMNS), layer_config=layer_config)
 
 # Train the model
-nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=50)
+nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=20)
 
 
+
+
+# Calculate the middle index of the data
+middle_idx = len(data) // 2
+
+# Get the start date from the index at middle_idx
+start_date = data.index[middle_idx]
 
 for config in prediction_columns:
     k_days = config['Days']
     feature_columns = config['Columns']
 
-    # Perform prediction using the multistep method
-    predictions = nn_model.predict_multistep(k_days)
+    # Update n_features in the model if FEATURE_COLUMNS change
+    nn_model.n_features = len(FEATURE_COLUMNS)
+
+    # Perform prediction using the predict_multistep method starting from middle_idx
+    predictions = nn_model.predict_multistep(k_days, start_idx=middle_idx)
 
     # Check if predictions were generated
     if predictions.size == 0:
@@ -401,7 +391,7 @@ for config in prediction_columns:
         continue
 
     # Print Predictions
-    print(f"\nPredictions for the next {k_days} days using columns {feature_columns}:")
+    print(f"\nPredictions for the next {k_days} days starting from {start_date.date()} using columns {feature_columns}:")
     for i, prediction in enumerate(predictions):
         predicted_value = prediction.item()
         print(f"Day {i+1:<7} {predicted_value:<30.4f}")
@@ -410,35 +400,28 @@ for config in prediction_columns:
     actual_scaled = data[PREDICTION_COLUMN].values.reshape(-1, 1)  # Reshape to 2D for inverse_transform
     actual = SCALERS[PREDICTION_COLUMN].inverse_transform(actual_scaled).flatten()  # Flatten back to 1D after scaling
 
-    # Take the last 'k_days' of the actual data for comparison
-    actual_last_days = actual[-k_days:]
+    # Take the actual data from middle_idx to middle_idx + k_days for comparison
+    actual_future_days = actual[middle_idx:middle_idx + k_days]
 
-    # Debugging step: Print min/max values of actual and predicted for comparison
-    print(f"Actual min/max after inverse scaling: {actual_last_days.min()}/{actual_last_days.max()}")
-    print(f"Predicted min/max: {predictions.min()}/{predictions.max()}")
-
-    # Create a continuous time axis for both actual and predicted data
-    time_actual = np.arange(k_days)  # First 'k_days' time steps for actual
-    time_pred = np.arange(k_days, 2 * k_days)  # Next 'k_days' time steps for predictions
+    # Create a date range for plotting
+    prediction_dates = data.index[middle_idx:middle_idx + k_days]
 
     plt.figure(figsize=(10, 6))
-    
-    # Plot the last 'k_days' of actual data
-    plt.plot(time_actual, actual_last_days, label="Actual")
 
-    # Plot predictions starting directly after the actual data
-    plt.plot(time_pred, predictions, label="Predicted", linestyle='--')
+    # Plot the actual data
+    plt.plot(prediction_dates, actual_future_days, label="Actual")
+
+    # Plot predictions
+    plt.plot(prediction_dates, predictions.flatten(), label="Predicted", linestyle='--')
 
     # Customize the plot
-    plt.title(f"Prediction vs Actual Data ({len(feature_columns)} features, {k_days} days)")
-    plt.xlabel("Time")
+    plt.title(f"Prediction vs Actual Data {feature_columns} features, {k_days} days starting from {start_date.date()})")
+    plt.xlabel("Date")
     plt.ylabel("Closing Price")
     plt.legend()
 
-    # Set the same y-limits for better visualization
-    plt.ylim([min(actual_last_days.min(), predictions.min()), max(actual_last_days.max(), predictions.max())])
-
     plt.show()
+
 
 
 
