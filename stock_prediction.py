@@ -40,10 +40,30 @@ data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 
 
 
+def load_interest_data():
+    # Load the interest rate data and parse dates
+    interest_df = pd.read_excel(
+        'data/interest_rates.xlsx',
+        sheet_name='Data_Cleaned',
+        usecols=['Date', 'Rate', 'Change']
+    )
+    # Rename columns for consistency
+    interest_df.columns = ['Date', 'Change_In_Rate', 'Interest_Rate']
+    interest_df['Date'] = pd.to_datetime(interest_df['Date'])
+    interest_df.set_index('Date', inplace=True)
+    return interest_df
+
+def add_interest_col(stock_df, interest_df):
+    # Use forward fill to propagate the closest previous interest rate and change in rate to each date in stock_df
+    stock_df['Interest_Rate'] = interest_df['Interest_Rate'].reindex(stock_df.index, method='ffill')
+    stock_df['Change_In_Rate'] = interest_df['Change_In_Rate'].reindex(stock_df.index, method='ffill')
+    return stock_df
+
+
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
                      scale=False, feature_columns=None, save_local=True, 
-                     load_local=True, local_dir='data'):
-       
+                     load_local=True, local_dir='data', interest_rate_path='interest_rates.xlsx'):
+    
     # Local file path
     local_file = os.path.join(local_dir, f"{ticker}_{start_date}_{end_date}.csv")
     
@@ -68,6 +88,10 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
     # Calculate the mid-point of Open & Close prices
     df['Mid_Price'] = (df['Open'] + df['Close']) / 2
     
+    # Load interest rate data and add it to the stock data
+    interest_df = load_interest_data()
+    df = add_interest_col(df, interest_df)
+    
     # Handle NaN values
     if handle_nan == 'drop':
         df.dropna(inplace=True)
@@ -83,7 +107,6 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
             df[column] = mmx_scaler.fit_transform(df[[column]])
             SCALERS[column] = mmx_scaler
 
-    
     # Return the cleaned DataFrame
     return df
 
@@ -199,10 +222,9 @@ prediction_columns = [
 ]
 
 layer_config = [
-    {"type": "LSTM", "units": 64, "dropout": 0.3, "bidirectional": True},
-    {"type": "LSTM", "units": 64, "dropout": 0.2, "bidirectional": False},
-    {"type": "Dense", "units": 32, "activation": "relu"},
-    {"type": "Dense", "units": 16, "activation": "relu"}
+    {"type": "LSTM", "units": 128, "dropout": 0.3, "bidirectional": True},
+    {"type": "GRU", "units": 64, "dropout": 0.2, "bidirectional": False},
+    {"type": "Dense", "units": 32, "activation": "relu"}
 ]
 
 
@@ -211,7 +233,7 @@ layer_config = [
 nn_model = NeuralNetworkModel(data=data, sequence_length=SEQUENCE_LENGTH, n_features=len(FEATURE_COLUMNS), layer_config=layer_config)
 
 # Train the model
-nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=100)
+nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=50)
 
 
 
@@ -304,9 +326,9 @@ last_steps = SCALERS[PREDICTION_COLUMN].inverse_transform(data[PREDICTION_COLUMN
 
 
 models = [
-    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.4},
-    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.6},
-    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.8}
+    {"type": "LSTM", "predictions": lstm_predictions, "weight": 0.8},
+    {"type": "SARIMA", "predictions": sarima_predictions, "weight": 0.4},
+    {"type": "Random Forest", "predictions": rf_predictions, "weight": 0.4}
 ]
 
 # Get ensemble predictions
@@ -315,37 +337,69 @@ ensemble_pred = ensemble_predictions(models, K_STEPS)
 #  print predictions
 print(f"Last 7 days: {last_steps}")
 print(f"Ensemble predictions: {ensemble_pred}")
-
-
 # Ensure the actual values are sliced to the last K_STEPS
 actual_last_steps = last_steps[-K_STEPS:]
 
-# Check that the lengths match K_STEPS
-if len(lstm_predictions) != K_STEPS or len(ensemble_pred) != K_STEPS:
-    raise ValueError("Prediction lengths must match K_STEPS.")
-
 # Create a time range for the x-axis
-time_range = np.arange(K_STEPS)
+date_range = data[PREDICTION_COLUMN].index[-K_STEPS:] 
 
-# Plot the actual values
-plt.figure(figsize=(12, 6))
-plt.plot(time_range, actual_last_steps, label="Actual", marker='o')
+
+
+fig, ax1 = plt.subplots(figsize=(12, 6))
+lines = []
+
+line, = ax1.plot(date_range, actual_last_steps, label="Actual", marker='o')
+lines.append(line)
 
 # Plot the LSTM model's predicted values
-plt.plot(time_range, lstm_predictions, label="LSTM Predictions", linestyle='--', marker='x')
+line, = ax1.plot(date_range, lstm_predictions, label="LSTM Predictions", linestyle='--', marker='x')
+lines.append(line)
 
 # Plot the Ensemble model's predicted values
-plt.plot(time_range, ensemble_pred, label="Ensemble Predictions", linestyle='-.', marker='s')
+line, = ax1.plot(date_range, ensemble_pred, label="Ensemble Predictions", linestyle='-.', marker='s')
+lines.append(line)
+
+with_int = ""
+if 'Interest_Rate' in FEATURE_COLUMNS:
+    # Extract interest rates for the same date range
+    interest_last_steps = data['Interest_Rate'][-K_STEPS:]
+    # Convert to a NumPy array and reshape it before applying inverse transform
+    interest_last_steps = SCALERS['Interest_Rate'].inverse_transform(interest_last_steps.values.reshape(-1, 1)).reshape(-1)
+
+    # Plot interest rates on a secondary y-axis
+    ax2 = ax1.twinx()  # Create a secondary y-axis
+    line, = ax2.plot(date_range, interest_last_steps, label="Interest Rate", color='purple', linestyle=':', marker='d')
+    lines.append(line)
+
+    ax2.set_ylabel("Interest Rate (%)")
+    with_int = " with Interest Rates"
+elif 'Change_In_Rate' in FEATURE_COLUMNS:
+    # Extract interest rates for the same date range
+    interest_last_steps = data['Change_In_Rate'][-K_STEPS:]
+    # Convert to a NumPy array and reshape it before applying inverse transform
+    interest_last_steps = SCALERS['Change_In_Rate'].inverse_transform(interest_last_steps.values.reshape(-1, 1)).reshape(-1)
+
+    # Plot interest rates on a secondary y-axis
+    ax2 = ax1.twinx()  # Create a secondary y-axis
+    line, = ax2.plot(date_range, interest_last_steps, label="Change_In_Rate Rate", color='purple', linestyle=':', marker='d')
+    lines.append(line)
+
+    ax2.set_ylabel("Change in Rate (%)")
+    with_int = " with Change In Rates"
+
+
+labels = [line.get_label() for line in lines]
+ax1.legend(lines, labels, loc="upper left")
 
 # Customize the plot
-plt.title("Actual vs. Predicted Values (LSTM and Ensemble Model)")
-plt.xlabel("Days")
-plt.ylabel("Closing Price")
-plt.legend()
-plt.grid(True)
+plt.title(f"Actual vs. Predicted Values (LSTM and Ensemble Model){with_int}")
+ax1.set_xlabel("Date")
+ax1.set_ylabel("Closing Price")
+ax1.grid(True)
 
 # Show the plot
 plt.show()
+
 
 
 exit()
