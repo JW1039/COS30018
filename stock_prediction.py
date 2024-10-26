@@ -7,15 +7,6 @@
 # Youtuble link: https://www.youtube.com/watch?v=PuZY9q-aKLw
 # By: NeuralNine
 
-# Need to install the following (best in a virtual env):
-# pip install numpy
-# pip install matplotlib
-# pip install pandas
-# pip install tensorflow
-# pip install scikit-learn
-# pip install pandas-datareader
-# pip install yfinance
-
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -39,7 +30,7 @@ import yfinance as yf
 data = yf.download(COMPANY,TRAIN_START,TRAIN_END)
 
 
-
+# Loads interest rate data from an Excel file, converts date formats, renames columns, and sets the date as the index.
 def load_interest_data():
     # Load the interest rate data and parse dates
     interest_df = pd.read_excel(
@@ -53,13 +44,15 @@ def load_interest_data():
     interest_df.set_index('Date', inplace=True)
     return interest_df
 
+# Adds interest rate and rate change columns to stock_df, filling missing values based on the closest prior date from interest_df.
 def add_interest_col(stock_df, interest_df):
     # Use forward fill to propagate the closest previous interest rate and change in rate to each date in stock_df
     stock_df['Interest_Rate'] = interest_df['Interest_Rate'].reindex(stock_df.index, method='ffill')
     stock_df['Change_In_Rate'] = interest_df['Change_In_Rate'].reindex(stock_df.index, method='ffill')
     return stock_df
 
-
+# Cleans and prepares stock data by loading locally or downloading, handling NaN values, adding calculated columns, and scaling specified features. 
+# Optionally saves the cleaned data locally.
 def clean_stock_data(ticker, start_date, end_date, handle_nan='drop', 
                      scale=False, feature_columns=None, save_local=True, 
                      load_local=True, local_dir='data', interest_rate_path='interest_rates.xlsx'):
@@ -112,8 +105,7 @@ def clean_stock_data(ticker, start_date, end_date, handle_nan='drop',
 
 
 
-
-
+# Generate data for training
 data = clean_stock_data(
     ticker=COMPANY,
     start_date=TRAIN_START,
@@ -124,6 +116,8 @@ data = clean_stock_data(
 )
 
 print(data)
+
+
 # plot a candlestick chart given a DataFrame
 def plot_candlestick_chart(data, title="Candlestick Chart", n_days=1):
 
@@ -186,10 +180,7 @@ def plot_boxplot_chart(data, title="Stock Prices Boxplot", n_days=1, columns=['O
 
 
 
-
-
-
-# make combined/averaged predictions
+# Generates ensemble predictions by combining predictions from multiple models, using weighted averaging over a specified number of steps.
 def ensemble_predictions(models, k_steps):
     predictions = []
 
@@ -238,63 +229,6 @@ nn_model.train(sequence_length=SEQUENCE_LENGTH, batch_size=32, epochs=50)
 
 
 
-# Calculate the middle index of the data
-middle_idx = len(data) // 2
-
-# Get the start date from the index at middle_idx
-start_date = data.index[middle_idx]
-
-for config in prediction_columns:
-    k_days = config['Days']
-    feature_columns = config['Columns']
-
-    # Update n_features in the model if FEATURE_COLUMNS change
-    nn_model.n_features = len(FEATURE_COLUMNS)
-
-    # Perform prediction using the predict_multistep method starting from middle_idx
-    predictions = nn_model.predict_multistep(k_days, start_idx=middle_idx)
-
-    # Check if predictions were generated
-    if predictions.size == 0:
-        print(f"No predictions were generated for {feature_columns}. Skipping plot.")
-        continue
-
-    # Print Predictions
-    print(f"\nPredictions for the next {k_days} days starting from {start_date.date()} using columns {feature_columns}:")
-    for i, prediction in enumerate(predictions):
-        predicted_value = prediction.item()
-        print(f"Day {i+1:<7} {predicted_value:<30.4f}")
-
-    if False:
-        # Inverse transform the actual data to bring it back to the original scale
-        actual_scaled = data[PREDICTION_COLUMN].values.reshape(-1, 1)  # Reshape to 2D for inverse_transform
-        actual = SCALERS[PREDICTION_COLUMN].inverse_transform(actual_scaled).flatten()  # Flatten back to 1D after scaling
-
-        # Take the actual data from middle_idx to middle_idx + k_days for comparison
-        actual_future_days = actual[middle_idx:middle_idx + k_days]
-
-        # Create a date range for plotting
-        prediction_dates = data.index[middle_idx:middle_idx + k_days]
-
-        plt.figure(figsize=(10, 6))
-
-        # Plot the actual data
-        plt.plot(prediction_dates, actual_future_days, label="Actual")
-
-        # Plot predictions
-        plt.plot(prediction_dates, predictions.flatten(), label="Predicted", linestyle='--')
-
-        # Customize the plot
-        plt.title(f"Prediction vs Actual Data {feature_columns} features, {k_days} days starting from {start_date.date()})")
-        plt.xlabel("Date")
-        plt.ylabel("Closing Price")
-        plt.legend()
-
-        plt.show()
-
-
-
-
 # Create sequences for multivariate & multistep prediction
 X, y = [], []
 for i in range(len(data) - SEQUENCE_LENGTH - K_STEPS + 1):
@@ -337,6 +271,7 @@ ensemble_pred = ensemble_predictions(models, K_STEPS)
 #  print predictions
 print(f"Last 7 days: {last_steps}")
 print(f"Ensemble predictions: {ensemble_pred}")
+
 # Ensure the actual values are sliced to the last K_STEPS
 actual_last_steps = last_steps[-K_STEPS:]
 
