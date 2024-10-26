@@ -1,7 +1,7 @@
 K_STEPS = 30*6
 SEQUENCE_LENGTH = 60
 
-FEATURE_COLUMNS = ['Open','Close','Change_In_Rate']
+FEATURE_COLUMNS = ['Open','Close','Interest_Rate']
 N_STEPS = 25
 PREDICTION_COLUMN = 'Close'
 SCALERS = {}

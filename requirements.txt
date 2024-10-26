@@ -7,3 +7,4 @@ pandas-datareader
 yfinance
 mplfinance
 openpyxl
+pmdarima
